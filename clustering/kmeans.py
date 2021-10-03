@@ -31,6 +31,7 @@ class Kmeans:
         self.n_samples, self.n_dim = X.shape
         self.bounds = np.array(list(zip(X.min(axis=0), X.max(axis=0))))
         self.converged = False
+        self.classes = None
         self.num_iterations = 0
         self.images_buffer = []
         self.__init_K()
@@ -88,6 +89,7 @@ class Kmeans:
                 if self.n_dim == 2:
                     self.images_buffer.append(self.__display_2d(self.X, assignations, overall_cost))
                 else:
+                    # coming when pca is done
                     raise NotImplementedError("Display is currently only Implemented for 2d Data. Upcoming changes!")
         
         else:
@@ -99,16 +101,20 @@ class Kmeans:
                 if self.n_dim == 2:
                     self.images_buffer.append(self.__display_2d(self.X, assignations, overall_cost))
                 else:
+                    # Coming when pca is done
                     raise NotImplementedError("Display is currently only Implemented for 2d Data. Upcoming changes!")
+        return assignations, counts_assigned
 
     def run(self):
         """ Execute the kmeans algorithm """
         while not self.converged:
             mu_k_old = deepcopy(self.mu_k)
-            self.__single_iteration()
+            assignations, _ = self.__single_iteration()
             if (mu_k_old == self.mu_k).all() and (self.num_iterations > 1):
                 self.converged = True
-        
+
+        self.classes = assignations
+
         if self.display:
             self.__generate_gif()
     
@@ -143,3 +149,6 @@ class Kmeans:
 
     def get_centroids(self):
         return self.mu_k
+    
+    def get_labeled_data(self):
+        return self.X, self.classes
