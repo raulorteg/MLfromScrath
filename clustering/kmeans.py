@@ -16,7 +16,7 @@ class Kmeans:
         3.2 Move centroids to the mean position of the samples assigned to each centroid
     end while
     """
-    def __init__(self, X, K=3, display: bool = False):
+    def __init__(self, X, K=3, display: bool = False, Kbounds: tuple = (2, 10)):
         """
         :param X: array of M d-dimensional samples
         :type X: numpy.ndarray
@@ -24,9 +24,11 @@ class Kmeans:
         :type K: int
         """
         assert (K < X.shape[0]), "Can't have more centroids than samples."
-        assert (K > 0), "Number of centroids must be postive integer."
+        assert (K > 1), "Number of centroids must be postive integer and greate than 1."
         self.X = X
         self.num_K = K
+        self.min_k = Kbounds[0]
+        self.max_k = Kbounds[1]
         self.display = display
         self.n_samples, self.n_dim = X.shape
         self.bounds = np.array(list(zip(X.min(axis=0), X.max(axis=0))))
@@ -36,8 +38,11 @@ class Kmeans:
         self.images_buffer = []
         self.__init_K()
 
-    def __init_K(self):
+    def __init_K(self, num_K=None):
         """ init the position of the centroids """
+        if num_K:
+            self.num_K = num_K
+
         self.mu_k = np.empty((self.num_K, self.n_dim))
         for d in range(self.n_dim):
             min_, max_ = self.bounds[d]
@@ -74,12 +79,15 @@ class Kmeans:
         counts_assigned = np.empty(self.num_K)
         for c_idx in range(self.num_K):
             sample_idxs = np.where(assignations == c_idx)
-            counts_assigned[c_idx] = len(sample_idxs)
+            counts_assigned[c_idx] = len(sample_idxs[0])
             mu_k[c_idx] = self.X[sample_idxs].mean(axis=0)
         return mu_k, counts_assigned
 
-    def __single_iteration(self):
+    def __single_iteration(self, num_K=None):
         """ Perform a single iteration on the kmeans algorithm """
+        if num_K:
+            self.num_K = num_K
+
         if self.num_iterations == 0:
             self.num_iterations += 1
             assignations, overall_cost = self.__assign_centroids()
@@ -103,10 +111,11 @@ class Kmeans:
                 else:
                     # Coming when pca is done
                     raise NotImplementedError("Display is currently only Implemented for 2d Data. Upcoming changes!")
-        return assignations, counts_assigned
+        return assignations.astype(int), counts_assigned
 
     def run(self):
         """ Execute the kmeans algorithm """
+        self.converged = False
         while not self.converged:
             mu_k_old = deepcopy(self.mu_k)
             assignations, _ = self.__single_iteration()
@@ -142,6 +151,59 @@ class Kmeans:
         img = Image.open(buf)
         return img
     
+    def silhouette_find_k(self):
+        """ Use the silhouette method to find the optimal number of k clusters """
+        self.display = False
+        s_array = np.empty(self.max_k+1-self.min_k)
+        idx_to_kvalue = np.zeros(self.max_k+1-self.min_k, dtype=int) + list(range(self.min_k, self.max_k+1))
+
+        for i, num_K in enumerate(range(self.min_k, self.max_k+1)):
+            self.__init_K(num_K=num_K)
+            self.num_iterations = 0
+            self.converged = False
+
+            while not self.converged:
+                mu_k_old = deepcopy(self.mu_k)
+                assignations, counts_assigned = self.__single_iteration(num_K=num_K)
+                if (mu_k_old == self.mu_k).all() and (self.num_iterations > 1):
+                    self.converged = True
+            s = self.__compute_shilhouette(assignations=assignations, counts_assigned=counts_assigned)
+            s_array[i] = s
+        
+        idx = np.argmax(s_array)
+        K_opt = idx_to_kvalue[idx]
+        self.num_K = K_opt
+        self.__init_K()
+        self.run()
+        
+
+    def __compute_shilhouette(self, assignations, counts_assigned):
+        """ Compute the silhouette coefficient of every sample in the dataset
+        :param assignations: Index of assigned centroids to each sample point
+        :type assignations: numpy.ndarray
+        :param counts_assigned: Number of samples assigned to each centroid
+        :type counts_assigned: numpy.ndarray
+        """
+        s_array = np.empty(self.n_samples)
+        for sample_idx, sample in enumerate(self.X):
+            cluster_label = int(assignations[sample_idx])
+            C_i = counts_assigned[cluster_label]
+            if C_i > 1:
+                accumulators = np.zeros(len(counts_assigned))
+                for idx_j, sample_j in enumerate(self.X):
+                    if not (sample_j == sample).all():
+                        accumulators[assignations[idx_j]] += np.linalg.norm(sample - sample_j)
+
+                a_i = accumulators[cluster_label]/(C_i-1)
+                rest_accumulators = np.delete(accumulators, cluster_label)
+                tmp_idx = np.argmin(rest_accumulators)
+                b_i = rest_accumulators[tmp_idx]/counts_assigned[tmp_idx]
+                s_array[sample_idx] = (b_i - a_i)/max(b_i, a_i)
+                
+            else:
+                s_array[sample_idx] = 0.0
+        return np.mean(s_array)
+
     def __generate_gif(self):
         """ generate .gif from the buffer of images if display flag is true. """
         kwargs_write = {'fps':1.0, 'quantizer':'nq'}
